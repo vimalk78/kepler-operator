@@ -22,6 +22,9 @@ git commit -s       # DCO sign-off required
 ✗ Never commit without human approval
 ✗ Never force push to main
 
+# Run a single test
+go test -v -run TestName ./pkg/path/...
+
 # Documentation Commands
 make docs            # Regenerate API docs after CRD changes
 grep -r "version"    # Check version consistency
@@ -30,12 +33,13 @@ grep -r "version"    # Check version consistency
 ## 📋 Table of Contents
 
 1. [Project Overview](#project-overview)
-2. [AI Agent Permissions](#ai-agent-permissions)
-3. [Code Standards](#code-standards)
-4. [Testing Requirements](#testing-requirements)
-5. [Contribution Workflow](#contribution-workflow)
-6. [Documentation Standards](#documentation-standards)
-7. [Getting Help](#getting-help)
+2. [Architecture Overview](#architecture-overview)
+3. [AI Agent Permissions](#ai-agent-permissions)
+4. [Code Standards](#code-standards)
+5. [Testing Requirements](#testing-requirements)
+6. [Contribution Workflow](#contribution-workflow)
+7. [Documentation Standards](#documentation-standards)
+8. [Getting Help](#getting-help)
 
 ---
 
@@ -57,6 +61,39 @@ kepler-operator/
 ```
 
 **Architecture**: See [docs/developer/architecture.md](docs/developer/architecture.md)
+
+## Architecture Overview
+
+### Two-Tier CRD Model
+
+- **PowerMonitor** (user-facing) — the CRD users create. Singleton: name must be `power-monitor`.
+- **PowerMonitorInternal** (operator-internal) — created automatically by the operator. Not intended for direct user interaction.
+
+### Controllers (`internal/controller/`)
+
+| Controller | Watches | Responsibility |
+|---|---|---|
+| `PowerMonitorReconciler` | PowerMonitor | Creates PowerMonitorInternal from user CR, copies status back |
+| `PowerMonitorInternalReconciler` | PowerMonitorInternal | **Workhorse**: creates Namespace, DaemonSet, RBAC, ConfigMaps, ServiceMonitor, SCC (OpenShift) |
+| `TokenExpiryReconciler` | Secrets | Manages kube-rbac-proxy token refresh |
+
+### Reconciler Framework (`pkg/reconciler/`)
+
+`Runner` chains `Reconciler` implementations and executes them sequentially. Key interfaces/types:
+
+- **Updater** / **Deleter** — create-or-update vs. cleanup reconcilers
+- **Finalizer** — adds finalizer and runs cleanup on deletion
+- **SecretMounter** — mounts secrets into the Kepler DaemonSet
+- **PowerMonitorDeployer** — high-level deployer composing all sub-reconcilers
+
+### Resource Builders (`pkg/components/power-monitor/`)
+
+Functions that construct K8s objects (DaemonSet, ConfigMap, Service, etc.). The `Detail` parameter controls whether a **Full** object (for create/update) or **Metadata-only** object (for delete) is built.
+
+### Configuration
+
+- `internal/config/` — Kepler exporter configuration (feature flags, metrics)
+- `internal/controller/config.go` — shared controller config (container images, cluster type detection)
 
 ## AI Agent Permissions
 
